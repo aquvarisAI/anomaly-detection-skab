@@ -1,0 +1,145 @@
+# =============================================================
+# SKAB — Skoltech Anomaly Benchmark
+# Notebook 01: Exploratory Data Analysis (EDA)
+# Autora: Bruna Preschadt de Oliveira
+# GitHub: https://github.com/bpreschad-gif
+# =============================================================
+
+# ── 1. IMPORTS ────────────────────────────────────────────────
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
+import seaborn as sns
+import warnings
+warnings.filterwarnings('ignore')
+
+plt.style.use('seaborn-v0_8-whitegrid')
+COLORS = {'normal': '#2196F3', 'anomaly': '#E53935', 'changepoint': '#FF9800'}
+
+# ── 2. CARREGAMENTO DOS DADOS ─────────────────────────────────
+# Dataset: https://www.kaggle.com/datasets/yuriykatser/skoltech-anomaly-benchmark-skab-teaser
+df = pd.read_csv('data/raw/skab_teaser.csv', index_col='datetime', parse_dates=True)
+
+print("Shape:", df.shape)
+print("\nColunas:", df.columns.tolist())
+print("\nPrimeiras linhas:")
+print(df.head())
+print("\nTipos de dados:")
+print(df.dtypes)
+print("\nValores nulos:")
+print(df.isnull().sum())
+
+# ── 3. OVERVIEW DO DATASET ────────────────────────────────────
+sensors = [c for c in df.columns if c not in ['anomaly', 'changepoint']]
+n_anomalias = df['anomaly'].sum()
+pct_anomalia = df['anomaly'].mean() * 100
+
+print(f"\n{'='*50}")
+print(f"Total de registros: {len(df):,}")
+print(f"Sensores: {len(sensors)}")
+print(f"Anomalias: {n_anomalias} ({pct_anomalia:.2f}%)")
+print(f"Período: {df.index.min()} → {df.index.max()}")
+print(f"{'='*50}")
+
+# ── 4. DISTRIBUIÇÃO DAS ANOMALIAS ─────────────────────────────
+fig, axes = plt.subplots(1, 2, figsize=(14, 4))
+
+# Barras de proporção
+labels = ['Normal', 'Anomalia']
+values = [len(df) - n_anomalias, n_anomalias]
+colors = [COLORS['normal'], COLORS['anomaly']]
+axes[0].bar(labels, values, color=colors, edgecolor='white', linewidth=1.5)
+axes[0].set_title('Distribuição: Normal vs Anomalia', fontsize=13, fontweight='bold')
+axes[0].set_ylabel('Quantidade de registros')
+for i, v in enumerate(values):
+    axes[0].text(i, v + 10, f'{v:,}\n({v/len(df)*100:.1f}%)', ha='center', fontsize=11)
+
+# Timeline de anomalias
+axes[1].plot(df.index, df[sensors[0]], color=COLORS['normal'], linewidth=0.8, label='Sinal normal', alpha=0.7)
+anomaly_mask = df['anomaly'] == 1
+axes[1].scatter(df.index[anomaly_mask], df[sensors[0]][anomaly_mask],
+                color=COLORS['anomaly'], s=15, label='Anomalia', zorder=5)
+axes[1].set_title(f'Série temporal — {sensors[0]}', fontsize=13, fontweight='bold')
+axes[1].legend()
+axes[1].xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
+
+plt.tight_layout()
+plt.savefig('img/01_distribuicao_anomalias.png', dpi=150, bbox_inches='tight')
+plt.show()
+print("✅ Salvo: img/01_distribuicao_anomalias.png")
+
+# ── 5. ANÁLISE DE TODOS OS SENSORES ──────────────────────────
+fig, axes = plt.subplots(len(sensors), 1, figsize=(14, 3 * len(sensors)), sharex=True)
+
+for i, sensor in enumerate(sensors):
+    ax = axes[i]
+    normal = df[df['anomaly'] == 0]
+    anomalo = df[df['anomaly'] == 1]
+    ax.plot(normal.index, normal[sensor], color=COLORS['normal'], linewidth=0.7, alpha=0.8, label='Normal')
+    ax.scatter(anomalo.index, anomalo[sensor], color=COLORS['anomaly'], s=10, label='Anomalia', zorder=5)
+    ax.set_ylabel(sensor.replace('RMS', ''), fontsize=9)
+    ax.set_title(sensor, fontsize=10, fontweight='bold')
+    if i == 0:
+        ax.legend(loc='upper right', fontsize=9)
+
+axes[-1].xaxis.set_major_formatter(mdates.DateFormatter('%H:%M:%S'))
+plt.suptitle('Todos os sensores — Normal vs Anomalia', fontsize=14, fontweight='bold', y=1.01)
+plt.tight_layout()
+plt.savefig('img/02_todos_sensores.png', dpi=150, bbox_inches='tight')
+plt.show()
+print("✅ Salvo: img/02_todos_sensores.png")
+
+# ── 6. CORRELAÇÃO ENTRE SENSORES ─────────────────────────────
+fig, ax = plt.subplots(figsize=(10, 8))
+corr = df[sensors].corr()
+mask = np.triu(np.ones_like(corr, dtype=bool))
+sns.heatmap(corr, annot=True, fmt='.2f', cmap='coolwarm', center=0,
+            mask=mask, ax=ax, linewidths=0.5, annot_kws={'size': 9})
+ax.set_title('Correlação entre sensores', fontsize=13, fontweight='bold')
+plt.tight_layout()
+plt.savefig('img/03_correlacao_sensores.png', dpi=150, bbox_inches='tight')
+plt.show()
+print("✅ Salvo: img/03_correlacao_sensores.png")
+
+# ── 7. ESTATÍSTICAS DESCRITIVAS ───────────────────────────────
+print("\n📊 ESTATÍSTICAS: NORMAL vs ANOMALIA")
+print("="*60)
+for sensor in sensors:
+    media_normal = df[df['anomaly']==0][sensor].mean()
+    media_anomalia = df[df['anomaly']==1][sensor].mean()
+    diff_pct = abs(media_anomalia - media_normal) / (media_normal + 1e-10) * 100
+    print(f"{sensor:<30} Normal: {media_normal:>8.3f}  |  Anomalia: {media_anomalia:>8.3f}  |  Δ: {diff_pct:.1f}%")
+
+# ── 8. ROLLING STATISTICS ─────────────────────────────────────
+fig, axes = plt.subplots(2, 1, figsize=(14, 8), sharex=True)
+
+sensor_plot = 'Accelerometer1RMS'
+window = 30
+
+rolling_mean = df[sensor_plot].rolling(window=window).mean()
+rolling_std = df[sensor_plot].rolling(window=window).std()
+upper = rolling_mean + 2 * rolling_std
+lower = rolling_mean - 2 * rolling_std
+
+axes[0].plot(df.index, df[sensor_plot], color='#90A4AE', linewidth=0.7, label='Sinal bruto', alpha=0.8)
+axes[0].plot(df.index, rolling_mean, color=COLORS['normal'], linewidth=1.5, label=f'Média móvel ({window}s)')
+axes[0].fill_between(df.index, lower, upper, alpha=0.2, color=COLORS['normal'], label='±2σ (zona normal)')
+axes[0].scatter(df.index[df['anomaly']==1], df[sensor_plot][df['anomaly']==1],
+                color=COLORS['anomaly'], s=20, label='Anomalia real', zorder=5)
+axes[0].set_title(f'{sensor_plot} — Rolling Statistics', fontsize=12, fontweight='bold')
+axes[0].legend(fontsize=9)
+
+axes[1].plot(df.index, rolling_std, color=COLORS['changepoint'], linewidth=1.2, label='Desvio padrão móvel')
+axes[1].axhline(rolling_std.quantile(0.95), color=COLORS['anomaly'], linestyle='--',
+                linewidth=1, label='Threshold (95° percentil)')
+axes[1].set_title('Desvio padrão móvel — detecta mudanças de regime', fontsize=12, fontweight='bold')
+axes[1].legend(fontsize=9)
+axes[1].xaxis.set_major_formatter(mdates.DateFormatter('%H:%M:%S'))
+
+plt.tight_layout()
+plt.savefig('img/04_rolling_statistics.png', dpi=150, bbox_inches='tight')
+plt.show()
+print("✅ Salvo: img/04_rolling_statistics.png")
+
+print("\n✅ EDA completa! Próximo passo: 02_anomaly_detection_skab.py")
